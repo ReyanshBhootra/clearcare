@@ -8,7 +8,7 @@ RULES:
 - Never diagnose. Never suggest medications. Never alarm the patient.
 - Ask one question at a time. Keep questions simple and human.
 - You must collect: chief complaint, onset time, severity (1-10), location on body, any relevant history
-- After 5-6 exchanges, when you have enough information, tell the patient help is coming, then output the JSON block below on a new line
+- After 5-6 exchanges, when you have enough information, say ONE short sentence to the patient that help is coming. Then on a new line output ONLY the raw JSON below with no markdown, no code fences, no --- separators, nothing else.
 
 ESCALATION: If the patient describes any of these, set escalation triggered to true:
 - Chest pain + arm/jaw pain
@@ -18,8 +18,11 @@ ESCALATION: If the patient describes any of these, set escalation triggered to t
 - Severe bleeding
 - Stroke symptoms
 
-When conversation is complete output this exact JSON in English:
-{"language":"","transcript":[],"summary":{"chief_complaint":"","symptom_onset":"","severity_1_to_10":"","red_flags":[],"triage_priority":"Immediate or Urgent or Non-Urgent","recommended_action":""},"escalation_alert":{"triggered":false,"reason":"","original_phrase":""}}`;
+When conversation is complete, say one short sentence to the patient that help is coming (in their language). Then output ONLY this JSON with no markdown, no code fences, nothing else:
+{"language":"","transcript":[],"summary":{"chief_complaint":"ALWAYS IN ENGLISH","symptom_onset":"ALWAYS IN ENGLISH","severity_1_to_10":"","red_flags":["ALWAYS IN ENGLISH"],"triage_priority":"Immediate or Urgent or Non-Urgent","recommended_action":"ALWAYS IN ENGLISH"},"escalation_alert":{"triggered":false,"reason":"ALWAYS IN ENGLISH","original_phrase":""}}
+
+CRITICAL: summary fields (chief_complaint, symptom_onset, red_flags, recommended_action) must ALWAYS be in English regardless of patient language. Only transcript stays in patient language. triage_priority must be exactly "Immediate", "Urgent", or "Non-Urgent".`;
+
 
 const ESCALATION_KEYWORDS = [
   "chest pain","pecho","brazo","arm","jaw","mandíbula",
@@ -68,7 +71,7 @@ export default function App() {
         const arrayBuffer = await blob.arrayBuffer();
 
         try {
-          const res = await fetch("http://localhost:3001/api/transcribe", {
+          const res = await fetch("http://localhost:4000/api/transcribe", {
             method: "POST",
             headers: { "Content-Type": "audio/webm" },
             body: arrayBuffer
@@ -110,19 +113,20 @@ export default function App() {
     setInput("");
     setLoading(true);
     try {
-      const response = await fetch("http://localhost:3001/api/chat", {
+      const response = await fetch("http://localhost:4000/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-haiku-4-5-20251001",
-          max_tokens: 300,
+          max_tokens: 1024,
           system: SYSTEM_PROMPT,
           messages: newHistory
         })
       });
       const data = await response.json();
       const reply = data.content[0].text;
-      const jsonMatch = reply.match(/\{[\s\S]*"triage_priority"[\s\S]*\}/);
+      const cleanReply = reply.replace(/```json/g, "").replace(/```/g, "");
+      const jsonMatch = cleanReply.match(/\{[\s\S]*"triage_priority"[\s\S]*\}/);
       if (jsonMatch) {
         try {
           const summary = JSON.parse(jsonMatch[0]);
@@ -134,7 +138,7 @@ export default function App() {
           setDone(true);
         } catch (e) {}
       }
-      const visibleReply = reply.replace(/\{[\s\S]*"triage_priority"[\s\S]*\}/, "").trim();
+      const visibleReply = cleanReply.replace(/\{[\s\S]*"triage_priority"[\s\S]*\}/, "").replace(/---/g, "").trim();
       if (visibleReply) setMessages([...newHistory, { role: "assistant", content: visibleReply }]);
     } catch (err) { console.error(err); }
     setLoading(false);
