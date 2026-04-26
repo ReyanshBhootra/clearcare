@@ -2,11 +2,40 @@
 // App.js — ClearCare Nurse Dashboard (v2)
 // Polls backend every 2s for patient data from Reyansh's app
 // Nurse can switch UI language via dropdown
+// Summary fields translate via Claude API when nurse changes language
 // ============================================================
 
 import { useState, useEffect, useRef } from "react";
 
 const BACKEND_URL = "http://localhost:4000";
+const ANTHROPIC_KEY = "RAY-API-KEY";
+
+// Translates a single piece of text using Claude Haiku
+async function translateText(text, targetLang) {
+  if (targetLang === "English") return text;
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_KEY,
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 500,
+        messages: [{
+          role: "user",
+          content: `Translate this medical text to ${targetLang}. Return ONLY the translated text, nothing else: "${text}"`
+        }]
+      })
+    });
+    const data = await res.json();
+    return data.content[0].text;
+  } catch (e) {
+    return text;
+  }
+}
 
 const NURSE_LANGS = {
   English: {
@@ -98,17 +127,38 @@ export default function App() {
   const [alertTime, setAlertTime] = useState(null);
   const [flash, setFlash] = useState(false);
   const [nurseLang, setNurseLang] = useState("English");
+  const [translating, setTranslating] = useState(false);
   const prevEscalation = useRef(false);
+  const lastTranslatedLang = useRef("English");
 
   const t = NURSE_LANGS[nurseLang];
 
+  // Poll for summary every 2 seconds
   useEffect(() => {
     const poll = setInterval(async () => {
       try {
         const res = await fetch(`${BACKEND_URL}/api/summary/latest`);
         if (!res.ok) return;
         const json = await res.json();
+
+        // Translate summary fields if nurse picked non-English
+        if (nurseLang !== "English") {
+          setTranslating(true);
+          const [cc, onset, action, flags] = await Promise.all([
+            translateText(json.summary.chief_complaint, nurseLang),
+            translateText(json.summary.symptom_onset, nurseLang),
+            translateText(json.summary.recommended_action, nurseLang),
+            Promise.all(json.summary.red_flags.map(f => translateText(f, nurseLang)))
+          ]);
+          json.summary.chief_complaint = cc;
+          json.summary.symptom_onset = onset;
+          json.summary.recommended_action = action;
+          json.summary.red_flags = flags;
+          setTranslating(false);
+        }
+
         setData(json);
+
         if (json.escalation_alert?.triggered && !prevEscalation.current) {
           setAlertTime(new Date().toLocaleTimeString());
           triggerBeep();
@@ -119,7 +169,38 @@ export default function App() {
       } catch (e) {}
     }, 2000);
     return () => clearInterval(poll);
-  }, []);
+  }, [nurseLang]); // re-runs when nurse changes language
+
+  // Re-translate existing data when nurse switches language
+  useEffect(() => {
+    if (!data || nurseLang === lastTranslatedLang.current) return;
+    lastTranslatedLang.current = nurseLang;
+
+    async function retranslate() {
+      setTranslating(true);
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/summary/latest`);
+        if (!res.ok) return;
+        const json = await res.json();
+
+        if (nurseLang !== "English") {
+          const [cc, onset, action, flags] = await Promise.all([
+            translateText(json.summary.chief_complaint, nurseLang),
+            translateText(json.summary.symptom_onset, nurseLang),
+            translateText(json.summary.recommended_action, nurseLang),
+            Promise.all(json.summary.red_flags.map(f => translateText(f, nurseLang)))
+          ]);
+          json.summary.chief_complaint = cc;
+          json.summary.symptom_onset = onset;
+          json.summary.recommended_action = action;
+          json.summary.red_flags = flags;
+        }
+        setData(json);
+      } catch (e) {}
+      setTranslating(false);
+    }
+    retranslate();
+  }, [nurseLang]);
 
   function triggerBeep() {
     try {
@@ -175,6 +256,7 @@ export default function App() {
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
           <span style={{ fontSize: "22px", fontWeight: 700, color: "#7eb8ff", letterSpacing: "-0.02em" }}>ClearCare</span>
           <span style={{ color: "#555", fontSize: "13px" }}>{t.nurseDashboard}</span>
+          {translating && <span style={{ fontSize: "11px", color: "#7eb8ff", opacity: 0.7 }}>Translating...</span>}
         </div>
         <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -231,78 +313,4 @@ export default function App() {
                 <div style={{ fontSize: "18px", fontWeight: 600, color: "#fff" }}>{data.summary.chief_complaint}</div>
               </div>
               <div>
-                <div style={{ fontSize: "11px", color: "#556", marginBottom: "6px", textTransform: "uppercase", letterSpacing: "0.1em" }}>{t.onset}</div>
-                <div style={{ fontSize: "16px", color: "#c8c8d8" }}>{data.summary.symptom_onset}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: "11px", color: "#556", marginBottom: "6px", textTransform: "uppercase", letterSpacing: "0.1em" }}>{t.severity}</div>
-                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                  <span style={{ fontSize: "28px", fontWeight: 700, color: pConfig.color }}>{data.summary.severity_1_to_10}</span>
-                  <span style={{ color: "#556" }}>/10</span>
-                  <div style={{ flex: 1, background: "#1a1a2e", borderRadius: "4px", height: "8px" }}>
-                    <div style={{ width: `${(data.summary.severity_1_to_10 / 10) * 100}%`, background: pConfig.color, height: "100%", borderRadius: "4px", transition: "width 0.5s ease" }} />
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div style={{ marginTop: "24px" }}>
-              <div style={{ fontSize: "11px", color: "#556", marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.1em" }}>{t.redFlags}</div>
-              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                {data.summary.red_flags.map((flag, i) => (
-                  <span key={i} style={{ background: "#1a0000", border: "1px solid #ff2d2d44", color: "#ff6666", padding: "5px 14px", borderRadius: "20px", fontSize: "13px", fontWeight: 500 }}>
-                    ⚑ {flag}
-                  </span>
-                ))}
-              </div>
-            </div>
-            <div style={{ marginTop: "24px", background: "#0d1f0d", border: "1px solid #1a3a1a", borderRadius: "10px", padding: "16px 20px" }}>
-              <div style={{ fontSize: "11px", color: "#4a8a4a", marginBottom: "6px", textTransform: "uppercase", letterSpacing: "0.1em" }}>{t.recommendedAction}</div>
-              <div style={{ fontSize: "15px", color: "#aaffaa", fontWeight: 500 }}>{data.summary.recommended_action}</div>
-            </div>
-          </div>
-          <TranscriptPanel transcript={data.transcript} language={data.language} t={t} />
-        </div>
-      )}
-
-      <style>{`
-        @keyframes flashAnim { 0%,100% { background: #8b0000; } 50% { background: #ff0000; } }
-        @keyframes pulseBadge { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
-      `}</style>
-    </div>
-  );
-}
-
-function TranscriptPanel({ transcript, language, t }) {
-  const [open, setOpen] = useState(true);
-  return (
-    <div style={{ background: "#111118", border: "1px solid #222235", borderRadius: "16px", padding: "24px", gridColumn: "1 / -1" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-        <div style={{ fontSize: "11px", letterSpacing: "0.15em", color: "#556", fontWeight: 600, textTransform: "uppercase" }}>
-          {t.transcript} — <span style={{ color: "#7eb8ff" }}>{language}</span>
-        </div>
-        <button onClick={() => setOpen(!open)} style={{ background: "#1a1a2e", border: "1px solid #2a2a4a", color: "#7eb8ff", padding: "5px 14px", borderRadius: "8px", cursor: "pointer", fontSize: "13px" }}>
-          {open ? t.collapse : t.expand}
-        </button>
-      </div>
-      {open && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px", maxHeight: "320px", overflowY: "auto" }}>
-          {transcript.map((msg, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: msg.role === "assistant" ? "flex-start" : "flex-end" }}>
-              <div style={{
-                background: msg.role === "assistant" ? "#1a1a2e" : "#0d1a0d",
-                border: `1px solid ${msg.role === "assistant" ? "#2a2a4a" : "#1a3a1a"}`,
-                borderRadius: "12px", padding: "10px 16px", maxWidth: "65%",
-                fontSize: "14px", color: msg.role === "assistant" ? "#a8b8e8" : "#a8e8a8"
-              }}>
-                <div style={{ fontSize: "10px", color: "#445", marginBottom: "4px", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                  {msg.role === "assistant" ? t.aiLabel : t.patientLabel}
-                </div>
-                {msg.content}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+                <div style={{ fontSize: "11px", color: "#556", marginBottom: "6px", textTransform: "uppercase", letterSpacing: "0.1em"
