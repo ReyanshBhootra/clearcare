@@ -19,12 +19,12 @@ ESCALATION: If the patient describes any of these, set escalation triggered to t
 - Stroke symptoms
 
 When conversation is complete output this exact JSON in English:
-{"language":"","summary":{"chief_complaint":"","symptom_onset":"","severity_1_to_10":"","red_flags":[],"triage_priority":"Immediate or Urgent or Non-urgent","recommended_action":""},"escalation_alert":{"triggered":false,"reason":"","original_phrase":""}}`;
+{"language":"","transcript":[],"summary":{"chief_complaint":"","symptom_onset":"","severity_1_to_10":"","red_flags":[],"triage_priority":"Immediate or Urgent or Non-Urgent","recommended_action":""},"escalation_alert":{"triggered":false,"reason":"","original_phrase":""}}`;
 
 const ESCALATION_KEYWORDS = [
-  "chest pain", "pecho", "brazo", "arm", "jaw", "mandíbula",
-  "breathing", "respirar", "aire", "unconscious", "suicid",
-  "bleeding", "sangr", "stroke", "derrame", "বুকে", "শ্বাস"
+  "chest pain","pecho","brazo","arm","jaw","mandíbula",
+  "breathing","respirar","aire","unconscious","suicid",
+  "bleeding","sangr","stroke","derrame","বুকে","শ্বাস"
 ];
 
 function detectEscalation(text) {
@@ -38,34 +38,77 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
   const [escalation, setEscalation] = useState(false);
-  const [escalationPhrase, setEscalationPhrase] = useState("");
+  const [listening, setListening] = useState(false);
   const bottomRef = useRef(null);
+  const recognitionRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
+  const startVoice = () => {
+    if (listening) {
+      mediaRecorderRef.current?.stop();
+      setListening(false);
+      return;
+    }
+
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      mediaRecorderRef.current = mediaRecorder;
+      const chunks = [];
+
+      mediaRecorder.ondataavailable = e => chunks.push(e.data);
+
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        setListening(false);
+        const blob = new Blob(chunks, { type: "audio/webm" });
+        const arrayBuffer = await blob.arrayBuffer();
+
+        try {
+          const res = await fetch("http://localhost:3001/api/transcribe", {
+            method: "POST",
+            headers: { "Content-Type": "audio/webm" },
+            body: arrayBuffer
+          });
+          const data = await res.json();
+          if (data.transcript) {
+            setInput(data.transcript);
+          }
+        } catch (err) {
+          console.error("Transcription error", err);
+        }
+      };
+
+      mediaRecorder.start();
+      setListening(true);
+
+      // Auto stop after 6 seconds
+      setTimeout(() => {
+        if (mediaRecorder.state === "recording") mediaRecorder.stop();
+      }, 6000);
+    }).catch(() => {
+      alert("Microphone access denied. Please allow mic access in Chrome.");
+    });
+  };
+
   const sendMessage = async () => {
     if (!input.trim() || loading) return;
-
-    // Check escalation on patient input
     if (detectEscalation(input)) {
       setEscalation(true);
-      setEscalationPhrase(input);
-      // Notify nurse dashboard immediately
       fetch("http://localhost:4000/api/escalation", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phrase: input, timestamp: new Date().toISOString() })
       }).catch(() => {});
     }
-
     const userMessage = { role: "user", content: input };
     const newHistory = [...messages, userMessage];
     setMessages(newHistory);
     setInput("");
     setLoading(true);
-
     try {
       const response = await fetch("http://localhost:3001/api/chat", {
         method: "POST",
@@ -77,10 +120,8 @@ export default function App() {
           messages: newHistory
         })
       });
-
       const data = await response.json();
       const reply = data.content[0].text;
-
       const jsonMatch = reply.match(/\{[\s\S]*"triage_priority"[\s\S]*\}/);
       if (jsonMatch) {
         try {
@@ -93,146 +134,167 @@ export default function App() {
           setDone(true);
         } catch (e) {}
       }
-
       const visibleReply = reply.replace(/\{[\s\S]*"triage_priority"[\s\S]*\}/, "").trim();
-      if (visibleReply) {
-        setMessages([...newHistory, { role: "assistant", content: visibleReply }]);
-      }
-    } catch (err) {
-      console.error(err);
-    }
+      if (visibleReply) setMessages([...newHistory, { role: "assistant", content: visibleReply }]);
+    } catch (err) { console.error(err); }
     setLoading(false);
   };
 
-  if (done) {
-    return (
-      <div style={styles.doneScreen}>
-        <div style={styles.doneCard}>
-          <div style={styles.checkCircle}>✓</div>
-          <h2 style={styles.doneTitle}>Thank you</h2>
-          <p style={styles.doneSubtitle}>A nurse will be with you shortly.</p>
-          <p style={styles.doneLanguages}>شكراً · Gracias · ধন্যবাদ · ਧੰਨਵਾਦ · धन्यवाद</p>
-        </div>
+  if (done) return (
+    <div style={s.donePage}>
+      <style>{animations}</style>
+      <div style={s.doneCard}>
+        <div style={s.doneCheck}>✓</div>
+        <h2 style={s.doneTitle}>You're all set</h2>
+        <p style={s.doneSub}>A nurse will be with you shortly.</p>
+        <p style={s.doneLangs}>شكراً · Gracias · ধন্যবাদ · ਧੰਨਵਾਦ · धन्यवाद · 谢谢</p>
       </div>
-    );
-  }
+    </div>
+  );
 
   return (
-    <div style={styles.page}>
-      {/* Escalation Banner */}
+    <div style={s.page}>
+      <style>{animations}</style>
+
+      {/* Mesh gradient background blobs */}
+      <div style={s.blob1} />
+      <div style={s.blob2} />
+      <div style={s.blob3} />
+
+      {/* Escalation banner */}
       {escalation && (
-        <div style={styles.escalationBanner}>
-          <span style={styles.escalationIcon}>⚠️</span>
+        <div style={s.alertBanner}>
+          <span style={{fontSize:"20px"}}>🚨</span>
           <div>
-            <div style={styles.escalationTitle}>NURSE ALERT SENT</div>
-            <div style={styles.escalationSub}>Emergency detected — help is being notified</div>
+            <div style={s.alertTitle}>EMERGENCY ALERT SENT TO NURSE</div>
+            <div style={s.alertSub}>Critical symptoms detected — help is being notified immediately</div>
           </div>
         </div>
       )}
 
-      <div style={styles.container}>
+      <div style={s.shell}>
         {/* Header */}
-        <div style={styles.header}>
-          <div style={styles.logoRow}>
-            <span style={styles.logoIcon}>🏥</span>
-            <span style={styles.logoText}>ClearCare</span>
+        <div style={s.header}>
+          <div style={s.logoWrap}>
+            <img src="/logo.jpg" style={{width:"42px", height:"42px", borderRadius:"10px"}} />
+            <span style={s.logoText}>ClearCare</span>
+            <span style={s.logoBadge}>AI Triage</span>
           </div>
-          <p style={styles.tagline}>Type in any language. We understand you.</p>
-          <div style={styles.langPills}>
-            {["Español", "বাংলা", "ਪੰਜਾਬੀ", "हिंदी", "العربية", "中文"].map(l => (
-              <span key={l} style={styles.pill}>{l}</span>
+          <p style={s.tagline}>Describe your symptoms in any language.</p>
+          <div style={s.pills}>
+            {["Español","বাংলা","ਪੰਜਾਬੀ","हिंदी","العربية","中文","Português"].map(l => (
+              <span key={l} style={s.pill}>{l}</span>
             ))}
           </div>
         </div>
 
-        {/* Chat */}
-        <div style={styles.chatBox}>
-          {messages.length === 0 && (
-            <div style={styles.emptyState}>
-              <div style={styles.emptyIcon}>👋</div>
-              <p style={styles.emptyText}>Tell us what brings you in today.</p>
-              <p style={styles.emptySubtext}>Describe your symptoms in your language below.</p>
+        {/* Chat window */}
+        <div style={s.chat}>
+          {messages.length === 0 ? (
+            <div style={s.empty}>
+              <div style={s.emptyPulse}>
+                <span style={{fontSize:"32px"}}>🏥</span>
+              </div>
+              <p style={s.emptyTitle}>Tell us what brings you in today</p>
+              <p style={s.emptySub}>Type or speak in your language — we understand you</p>
             </div>
-          )}
-          {messages.map((m, i) => (
-            <div key={i} style={m.role === "user" ? styles.userRow : styles.assistantRow}>
-              {m.role === "assistant" && <div style={styles.avatar}>🏥</div>}
-              <div style={m.role === "user" ? styles.userBubble : styles.assistantBubble}>
+          ) : messages.map((m, i) => (
+            <div key={i} style={m.role==="user" ? s.userRow : s.botRow}>
+              {m.role==="assistant" && <div style={s.botAvatar}>+</div>}
+              <div style={m.role==="user" ? s.userBubble : s.botBubble}>
                 {m.content}
               </div>
             </div>
           ))}
           {loading && (
-            <div style={styles.assistantRow}>
-              <div style={styles.avatar}>🏥</div>
-              <div style={styles.assistantBubble}>
-                <span style={styles.typing}>●●●</span>
+            <div style={s.botRow}>
+              <div style={s.botAvatar}>+</div>
+              <div style={s.botBubble}>
+                <span style={s.dots}>●&nbsp;●&nbsp;●</span>
               </div>
             </div>
           )}
           <div ref={bottomRef} />
         </div>
 
-        {/* Input */}
-        <div style={styles.inputWrapper}>
-          <div style={styles.inputRow}>
+        {/* Input bar */}
+        <div style={s.inputArea}>
+          <div style={s.inputBar}>
+            <button
+              style={{...s.micBtn, background: listening ? "#ff3b30" : "rgba(255,255,255,0.1)"}}
+              onClick={startVoice}
+              title="Speak in any language"
+            >
+              {listening ? "🔴" : "🎤"}
+            </button>
             <input
-              style={styles.input}
+              style={s.input}
               value={input}
               onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && sendMessage()}
-              placeholder="Type here in any language..."
+              onKeyDown={e => e.key==="Enter" && sendMessage()}
+              placeholder={listening ? "Listening..." : "Type here in any language..."}
               disabled={loading}
             />
             <button
-              style={{...styles.sendBtn, opacity: loading ? 0.6 : 1}}
+              style={{...s.sendBtn, opacity: (!input.trim()||loading) ? 0.5 : 1}}
               onClick={sendMessage}
-              disabled={loading}
+              disabled={!input.trim()||loading}
             >
-              {loading ? "..." : "→"}
+              ↑
             </button>
           </div>
-          <p style={styles.footer}>🔒 Your information is securely sent to your nurse</p>
+          <p style={s.footerText}>🔒 Securely sent to your nurse · Powered by Claude AI</p>
         </div>
       </div>
     </div>
   );
 }
 
-const styles = {
-  page: { minHeight: "100vh", background: "linear-gradient(135deg, #f0f7ff 0%, #e8f4fd 100%)", display: "flex", flexDirection: "column", alignItems: "center" },
-  escalationBanner: { width: "100%", background: "linear-gradient(90deg, #ff3b30, #ff6b35)", color: "white", padding: "14px 24px", display: "flex", alignItems: "center", gap: "16px", animation: "pulse 1s infinite", boxShadow: "0 4px 20px rgba(255,59,48,0.4)", zIndex: 100 },
-  escalationIcon: { fontSize: "28px" },
-  escalationTitle: { fontWeight: "800", fontSize: "16px", letterSpacing: "1px" },
-  escalationSub: { fontSize: "13px", opacity: 0.9 },
-  container: { width: "100%", maxWidth: "620px", display: "flex", flexDirection: "column", minHeight: "100vh", padding: "0 16px" },
-  header: { textAlign: "center", padding: "32px 0 20px" },
-  logoRow: { display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", marginBottom: "8px" },
-  logoIcon: { fontSize: "32px" },
-  logoText: { fontSize: "32px", fontWeight: "800", background: "linear-gradient(135deg, #1a73e8, #0d47a1)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" },
-  tagline: { color: "#555", fontSize: "15px", margin: "0 0 16px" },
-  langPills: { display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "8px" },
-  pill: { background: "white", border: "1px solid #d0e4ff", color: "#1a73e8", padding: "4px 12px", borderRadius: "20px", fontSize: "12px", fontWeight: "500" },
-  chatBox: { flex: 1, background: "white", borderRadius: "20px", padding: "20px", marginBottom: "16px", overflowY: "auto", minHeight: "400px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)" },
-  emptyState: { textAlign: "center", padding: "60px 20px" },
-  emptyIcon: { fontSize: "48px", marginBottom: "16px" },
-  emptyText: { fontSize: "20px", color: "#333", fontWeight: "600", margin: "0 0 8px" },
-  emptySubtext: { fontSize: "14px", color: "#888" },
-  userRow: { display: "flex", justifyContent: "flex-end", marginBottom: "12px" },
-  assistantRow: { display: "flex", alignItems: "flex-start", gap: "10px", marginBottom: "12px" },
-  avatar: { fontSize: "24px", flexShrink: 0 },
-  userBubble: { background: "linear-gradient(135deg, #1a73e8, #1557b0)", color: "white", padding: "12px 18px", borderRadius: "20px 20px 4px 20px", maxWidth: "80%", fontSize: "15px", lineHeight: "1.5", boxShadow: "0 2px 8px rgba(26,115,232,0.3)" },
-  assistantBubble: { background: "#f8f9fa", color: "#333", padding: "12px 18px", borderRadius: "20px 20px 20px 4px", maxWidth: "80%", fontSize: "15px", lineHeight: "1.5", boxShadow: "0 2px 8px rgba(0,0,0,0.06)" },
-  typing: { letterSpacing: "4px", color: "#1a73e8", animation: "pulse 1s infinite" },
-  inputWrapper: { paddingBottom: "24px" },
-  inputRow: { display: "flex", gap: "10px", alignItems: "center" },
-  input: { flex: 1, padding: "16px 20px", borderRadius: "30px", border: "2px solid #d0e4ff", fontSize: "15px", outline: "none", background: "white", boxShadow: "0 2px 12px rgba(0,0,0,0.06)", transition: "border-color 0.2s" },
-  sendBtn: { width: "52px", height: "52px", borderRadius: "50%", background: "linear-gradient(135deg, #1a73e8, #1557b0)", color: "white", border: "none", fontSize: "22px", cursor: "pointer", boxShadow: "0 4px 12px rgba(26,115,232,0.4)", display: "flex", alignItems: "center", justifyContent: "center" },
-  footer: { textAlign: "center", fontSize: "12px", color: "#999", marginTop: "10px" },
-  doneScreen: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg, #f0f7ff, #e8f4fd)" },
-  doneCard: { textAlign: "center", background: "white", padding: "60px 48px", borderRadius: "24px", boxShadow: "0 8px 40px rgba(0,0,0,0.12)", maxWidth: "400px" },
-  checkCircle: { width: "80px", height: "80px", borderRadius: "50%", background: "linear-gradient(135deg, #34a853, #1e8e3e)", color: "white", fontSize: "40px", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 24px" },
-  doneTitle: { fontSize: "36px", fontWeight: "800", color: "#1a1a1a", margin: "0 0 12px" },
-  doneSubtitle: { color: "#555", fontSize: "16px", margin: "0 0 16px" },
-  doneLanguages: { color: "#999", fontSize: "13px" }
+const animations = `
+  @keyframes fadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+  @keyframes blobMove { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(30px,-20px) scale(1.05); } }
+  @keyframes alertFlash { 0%,100% { opacity:1; } 50% { opacity:0.85; } }
+`;
+
+const s = {
+  page: { minHeight:"100vh", background:"#0a0a0f", display:"flex", flexDirection:"column", alignItems:"center", position:"relative", overflow:"hidden", fontFamily:"-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" },
+  blob1: { position:"fixed", width:"600px", height:"600px", borderRadius:"50%", background:"radial-gradient(circle, rgba(99,102,241,0.15) 0%, transparent 70%)", top:"-100px", left:"-100px", animation:"blobMove 8s ease-in-out infinite", pointerEvents:"none" },
+  blob2: { position:"fixed", width:"500px", height:"500px", borderRadius:"50%", background:"radial-gradient(circle, rgba(59,130,246,0.12) 0%, transparent 70%)", bottom:"-50px", right:"-50px", animation:"blobMove 10s ease-in-out infinite reverse", pointerEvents:"none" },
+  blob3: { position:"fixed", width:"400px", height:"400px", borderRadius:"50%", background:"radial-gradient(circle, rgba(99,102,241,0.06) 0%, transparent 70%)", top:"50%", left:"50%", transform:"translate(-50%,-50%)", animation:"blobMove 12s ease-in-out infinite", pointerEvents:"none" },
+  alertBanner: { width:"100%", background:"linear-gradient(90deg,#ff3b30,#ff6b35)", color:"white", padding:"14px 28px", display:"flex", alignItems:"center", gap:"16px", zIndex:100, animation:"alertFlash 0.8s infinite" },
+  alertTitle: { fontWeight:"800", fontSize:"15px", letterSpacing:"0.5px" },
+  alertSub: { fontSize:"12px", opacity:0.9, marginTop:"2px" },
+  shell: { width:"100%", maxWidth:"640px", display:"flex", flexDirection:"column", minHeight:"100vh", padding:"0 20px", position:"relative", zIndex:1 },
+  header: { padding:"40px 0 24px", textAlign:"center" },
+  logoWrap: { display:"flex", alignItems:"center", justifyContent:"center", gap:"10px", marginBottom:"12px" },
+  logoIcon: { width:"36px", height:"36px", borderRadius:"10px", background:"linear-gradient(135deg,#6366f1,#3b82f6)", color:"white", fontWeight:"900", fontSize:"20px", display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 0 20px rgba(99,102,241,0.4)" },
+  logoText: { fontSize:"26px", fontWeight:"800", color:"white", letterSpacing:"-0.5px" },
+  logoBadge: { background:"rgba(99,102,241,0.2)", border:"1px solid rgba(99,102,241,0.4)", color:"#a5b4fc", padding:"3px 10px", borderRadius:"20px", fontSize:"11px", fontWeight:"600", letterSpacing:"0.5px" },
+  tagline: { color:"rgba(255,255,255,0.5)", fontSize:"14px", margin:"0 0 16px" },
+  pills: { display:"flex", flexWrap:"wrap", justifyContent:"center", gap:"8px" },
+  pill: { background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.1)", color:"rgba(255,255,255,0.6)", padding:"4px 12px", borderRadius:"20px", fontSize:"12px" },
+  chat: { flex:1, background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:"20px", padding:"24px", marginBottom:"16px", overflowY:"auto", minHeight:"400px", backdropFilter:"blur(20px)" },
+  empty: { display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", height:"100%", padding:"60px 20px", textAlign:"center" },
+  emptyPulse: { width:"72px", height:"72px", borderRadius:"50%", background:"rgba(99,102,241,0.15)", border:"1px solid rgba(99,102,241,0.3)", display:"flex", alignItems:"center", justifyContent:"center", marginBottom:"20px", animation:"pulse 2s infinite" },
+  emptyTitle: { fontSize:"20px", fontWeight:"700", color:"rgba(255,255,255,0.9)", margin:"0 0 8px" },
+  emptySub: { fontSize:"14px", color:"rgba(255,255,255,0.4)", maxWidth:"280px" },
+  userRow: { display:"flex", justifyContent:"flex-end", marginBottom:"12px", animation:"fadeIn 0.3s ease" },
+  botRow: { display:"flex", alignItems:"flex-start", gap:"10px", marginBottom:"12px", animation:"fadeIn 0.3s ease" },
+  botAvatar: { width:"32px", height:"32px", borderRadius:"10px", background:"linear-gradient(135deg,#6366f1,#3b82f6)", color:"white", fontWeight:"900", fontSize:"16px", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 },
+  userBubble: { background:"linear-gradient(135deg,#6366f1,#4f46e5)", color:"white", padding:"12px 18px", borderRadius:"18px 18px 4px 18px", maxWidth:"78%", fontSize:"15px", lineHeight:"1.6", boxShadow:"0 4px 16px rgba(99,102,241,0.3)" },
+  botBubble: { background:"rgba(255,255,255,0.07)", border:"1px solid rgba(255,255,255,0.1)", color:"rgba(255,255,255,0.9)", padding:"12px 18px", borderRadius:"18px 18px 18px 4px", maxWidth:"78%", fontSize:"15px", lineHeight:"1.6" },
+  dots: { animation:"pulse 1s infinite", color:"#6366f1", letterSpacing:"3px" },
+  inputArea: { paddingBottom:"28px" },
+  inputBar: { display:"flex", alignItems:"center", gap:"10px", background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:"16px", padding:"8px 8px 8px 16px", backdropFilter:"blur(20px)" },
+  micBtn: { width:"40px", height:"40px", borderRadius:"10px", border:"none", cursor:"pointer", fontSize:"18px", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, transition:"all 0.2s" },
+  input: { flex:1, background:"transparent", border:"none", outline:"none", color:"white", fontSize:"15px", padding:"6px 0" },
+  sendBtn: { width:"40px", height:"40px", borderRadius:"10px", background:"linear-gradient(135deg,#6366f1,#4f46e5)", border:"none", color:"white", fontSize:"20px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, boxShadow:"0 4px 12px rgba(99,102,241,0.4)", transition:"opacity 0.2s" },
+  footerText: { textAlign:"center", fontSize:"11px", color:"rgba(255,255,255,0.25)", marginTop:"10px" },
+  donePage: { minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"#0a0a0f" },
+  doneCard: { textAlign:"center", background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", padding:"60px 48px", borderRadius:"24px", backdropFilter:"blur(20px)" },
+  doneCheck: { width:"80px", height:"80px", borderRadius:"50%", background:"linear-gradient(135deg,#10b981,#059669)", color:"white", fontSize:"36px", display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 24px", boxShadow:"0 0 40px rgba(16,185,129,0.3)" },
+  doneTitle: { fontSize:"32px", fontWeight:"800", color:"white", margin:"0 0 12px" },
+  doneSub: { color:"rgba(255,255,255,0.5)", fontSize:"16px", margin:"0 0 16px" },
+  doneLangs: { color:"rgba(255,255,255,0.25)", fontSize:"13px" },
 };

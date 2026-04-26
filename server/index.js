@@ -24,4 +24,30 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
+app.post("/api/transcribe", async (req, res) => {
+  try {
+    const chunks = [];
+    req.on("data", chunk => chunks.push(chunk));
+    req.on("end", async () => {
+      const audioBuffer = Buffer.concat(chunks);
+      const response = await fetch(
+        "https://api.deepgram.com/v1/listen?model=nova-2&detect_language=true&smart_format=true&language=multi",
+        {
+          method: "POST",
+          headers: {
+            "Authorization": `Token ${process.env.DEEPGRAM_KEY}`,
+            "Content-Type": "audio/webm"
+          },
+          body: audioBuffer
+        }
+      );
+      const data = await response.json();
+      const transcript = data.results?.channels[0]?.alternatives[0]?.transcript || "";
+      res.json({ transcript });
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(3001, () => console.log("Server running on port 3001"));

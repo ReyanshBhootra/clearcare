@@ -2,12 +2,40 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>client</title>
+    <title>ClearCare — AI Triage</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { background: #0a0a0f; }
+      .ripple {
+        position: fixed;
+        border-radius: 50%;
+        background: radial-gradient(circle, #bef3cb41 0%, transparent 70%);
+        transform: scale(0);
+        animation: rippleOut 1.2s ease-out forwards;
+        pointer-events: none;
+        z-index: 9999;
+      }
+      @keyframes rippleOut {
+        to { transform: scale(1); opacity: 0; }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+    <script>
+      document.addEventListener('click', function(e) {
+        const ripple = document.createElement('div');
+        ripple.className = 'ripple';
+        const size = 200;
+        ripple.style.width = size + 'px';
+        ripple.style.height = size + 'px';
+        ripple.style.left = (e.clientX - size/2) + 'px';
+        ripple.style.top = (e.clientY - size/2) + 'px';
+        document.body.appendChild(ripple);
+        setTimeout(() => ripple.remove(), 1200);
+      });
+    </script>
   </body>
 </html>
