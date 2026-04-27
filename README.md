@@ -15,6 +15,9 @@ ClearCare is a Claude-powered multilingual triage assistant. Patients describe t
 
 ---
 
+## Video Demonstration
+[YouTube Demo (CLICK ME)](https://youtu.be/RyhEDdF-hU8)
+
 ## Screenshots
 
 ### Patient Side
