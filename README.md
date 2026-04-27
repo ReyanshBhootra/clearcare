@@ -18,10 +18,10 @@ ClearCare is a Claude-powered multilingual triage assistant. Patients describe t
 ## Screenshots
 
 ### Patient Side
-![Patient Interface](screenshots/patient.png)
+![Patient Interface](patient.png)
 
 ### Nurse Dashboard
-![Nurse Dashboard](screenshots/nurse.png)
+![Nurse Dashboard](nurse.png)
 
 ---
 
